@@ -1,0 +1,139 @@
+---
+title: "Time Series Coursework 1"
+author: "Yuchen Xiao 200932400"
+date: "2024-03-15"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## 1. Data Background and Purpose of the Project
+### 1.1 Southern Oscillation Index data
+
+The dataset that I am using is the time series "soi" from library(astsa).
+The **Southern Oscillation Index (SOI)** is a standardized index based on the observed sea level pressure differences between Tahiti and Darwin, Australia.
+It records the SOI for a period of 453 months over the years 1950-1987.
+The aim of this project is to fit a model to the soi data with the Prophet forecasting system.
+We can then predict future values using the predict function.
+
+### 1.2 How SOI is calculated
+
+$SOI = \frac{sSLP_{Tahiti} - sSLP_{Darwin}}{\sigma_{monthly}}$
+
+where
+
+$sSLP = \frac{aSLP — mSLP}{\sigma}$,
+
+$\sigma = \sqrt{\Sigma(aSLP - mSLP)^2/N}$
+
+and
+
+$\sigma_{monthly} = \sqrt{\Sigma(sSLP_{Tahiti}-sSLP_{Darwin})^2/N}$
+
+<center>
+***SLP*** = Sea Level Pressure,
+***sSLP*** = standard SLP,
+***aSLP*** = actual SLP,
+***mSLP*** = mean SLP,
+<center>
+
+### 1.3 Initial observations
+
+Some graphs plotted with decomposition and dygraph.
+```{r 1.2.1 decomposition and dygraph}
+library(astsa)
+plot(decompose(soi))
+
+library(dygraphs)
+dygraph(soi, main = "SOI dygraph", xlab = "Year", ylab = "Southern Oscillation Index")%>% 
+  dyRangeSelector(dateWindow = c("1950-01-01", "1970-01-01"))
+```
+
+From the decomposition and dygraph we can observe that the SOI is often lowest in May and July, highest in February. This is intuitive since May to July is winter and February is summer in Australia. There is obvious **yearly seasonality** in the dataset.
+
+There is no overall upward or downward **trend** but the trend shows some periodicity.
+
+Our **noise** seems homoskedastic which indicates that this time series is **stationary**.
+
+## 2. Predicting future SOI data using Prophet. 
+I ran **install.packages("remotes")**
+and <b>remotes::install_github('facebook/prophet@*release', subdir='R')</b>
+```{r 2}
+library(prophet)
+```
+
+2.1 Set soi as an R dataframe with the time column called ds and the data column called y.
+```{r 2.1}
+soi.df = data.frame(ds=zoo::as.yearmon(time(soi)), y=soi)
+```
+
+2.2. Run *m = prophet(d)*.
+```{r 2.2}
+model = prophet(soi.df, weekly.seasonality = FALSE, daily.seasonality = FALSE)
+```
+
+2.3. Create future dates for forecasting of 36 months, 3 years.
+```{r 2.3}
+forecast = make_future_dataframe(model, periods=36, freq="month")
+```
+
+2.4. Run the usual predict function.
+```{r 2.4}
+prediction = predict(model, forecast)
+```
+
+2.5. Display the forecast using *plot(m, p)*
+```{r 2.5}
+plot(model,prediction, main = "SOI with Prediction", xlab = "Time", ylab = "Southern Oscillation Index")
+```
+
+2.6 Use *prophet_plot_components* to see the predicted data broken down into trend and yearly seasonality.
+```{r}
+prophet_plot_components(model, prediction) #there is a downward trend used for our prediction
+dyplot.prophet(model, prediction, main = "Preditcted vs. Actual data Dygraph", xlab = "Time", ylab = "SOI")%>% 
+  dyRangeSelector(dateWindow = c("1950-01-01", "1970-01-01"))
+```
+
+This interactive plot of the forecast allows us to hover the mouse over data points and see the actual vs. predicted data.
+
+2.7 Diagnostic checking
+We run diagnostic checking with **cross validation**, using the first 10 years (3650 days) as the initial training period and specify the forecast horizon as 1 year.
+```{r 2.7}
+soi.cv <- cross_validation(model, initial =3650, period = 180, horizon = 365, units = 'days')
+head(soi.cv)
+soi.p <- performance_metrics(soi.cv) #gives statistics of the prediction performance including Mean Squared Error(MSE), Root Mean Squared Error(RMSE), etc. and coverage of the yhat_lower and yhat_upper estimates.
+head(soi.p)
+plot_cross_validation_metric(soi.cv, metric = "mse") 
+```
+The metric I used here is "Mean Squared Error" represented as the dots on the graph. The blue line shows the MSE, where the mean is taken over a rolling window of the predictions in df.soi with default 10%.
+For this forecast the MSEs are around 0.1 somewhat consistently for predictions over the whole year.
+
+2.8 Repeating 2.2 to 2.7 with weekly seasonality.
+```{r 2.8}
+model1 = prophet(soi.df, weekly.seasonality = TRUE, daily.seasonality = FALSE)
+future1 = make_future_dataframe(model, periods=36, freq="month")
+prediction1 = predict(model1, forecast)
+plot(model1,prediction1, main = "SOI with Prediction (weekly seasonality)", xlab = "Time", ylab = "Southern Oscillation Index")
+prophet_plot_components(model1, prediction1) #there is a downward trend used for our prediction
+dyplot.prophet(model1, prediction1, main = "Preditcted vs. Actual data Dygraph", xlab = "Time", ylab = "SOI")%>% 
+  dyRangeSelector(dateWindow = c("1950-01-01", "1970-01-01"))
+soi.cv1 <- cross_validation(model, initial =3650, period = 180, horizon = 365, units = 'days')
+head(soi.cv1)
+soi.p1 <- performance_metrics(soi.cv1) #gives statistics of the prediction performance including Mean Squared Error(MSE), Root Mean Squared Error(RMSE), etc. and coverage of the yhat_lower and yhat_upper estimates.
+head(soi.p1)
+plot_cross_validation_metric(soi.cv1, metric = "mse") 
+```
+
+Apart from the additional observation on weekly seasonality, our predictions are not too different from the first time. The MSE is still at 0.1 which does not show significant improvement from the other model.
+
+## Reference
+Website for information on SOI and how it is calculated:
+<center>
+<https://www.ncei.noaa.gov/access/monitoring/enso/soi>
+</center>
+
+Examples and instruction on Prophet forecasting system:
+<center>
+<https://facebook.github.io/prophet/docs/diagnostics.html#cross-validation>
+<center>
+
